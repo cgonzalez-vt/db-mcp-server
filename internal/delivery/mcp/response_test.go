@@ -141,6 +141,14 @@ func TestFormatResponse(t *testing.T) {
 			useMock:        false,
 		},
 		{
+			name:           "empty map response",
+			input:          map[string]interface{}{},
+			err:            nil,
+			expectError:    false,
+			expectedOutput: `{"content":[]}`,
+			useMock:        false,
+		},
+		{
 			name:           "Input is nil",
 			input:          nil,
 			err:            nil,

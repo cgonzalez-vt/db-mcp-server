@@ -65,13 +65,34 @@ func FormatResponse(response interface{}, err error) (interface{}, error) {
 
 	// If response is already an Response, return it
 	if mcpResp, ok := response.(*Response); ok {
+		// If content is empty, return a new empty response to ensure consistency
+		if len(mcpResp.Content) == 0 {
+			return NewResponse(), nil
+		}
 		return mcpResp, nil
+	}
+
+	// Handle string responses, checking for empty strings
+	if strResponse, ok := response.(string); ok {
+		if strResponse == "" || strResponse == "[]" {
+			return NewResponse(), nil
+		}
+		return FromString(strResponse), nil
 	}
 
 	// If response is already properly formatted with content as an array
 	if respMap, ok := response.(map[string]interface{}); ok {
+		// If the map is empty, return a new empty response
+		if len(respMap) == 0 {
+			return NewResponse(), nil
+		}
+
 		if content, exists := respMap["content"]; exists {
-			if _, isArray := content.([]interface{}); isArray {
+			if contentSlice, isSlice := content.([]interface{}); isSlice {
+				// If content is an empty slice, return a new empty response
+				if len(contentSlice) == 0 {
+					return NewResponse(), nil
+				}
 				return respMap, nil
 			}
 		}
@@ -91,11 +112,6 @@ func FormatResponse(response interface{}, err error) (interface{}, error) {
 
 			return newResp, nil
 		}
-	}
-
-	// Handle string responses by wrapping in proper content array format
-	if strResponse, ok := response.(string); ok {
-		return FromString(strResponse), nil
 	}
 
 	// For any other type, convert to string and wrap in proper content format
