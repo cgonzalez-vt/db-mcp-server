@@ -61,6 +61,11 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 		return nil, fmt.Errorf("query parameter is required")
 	}
 
+	// Validate that the query is read-only
+	if err := validateReadOnlyQuery(query); err != nil {
+		return nil, err
+	}
+
 	// Get database ID
 	databaseID, ok := getStringParam(params, "database")
 	if !ok {
@@ -182,6 +187,54 @@ func handleMockQuery(ctx context.Context, params map[string]interface{}) (interf
 //nolint:unused // Retained for future use
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// validateReadOnlyQuery checks if a query contains only read-only operations
+func validateReadOnlyQuery(query string) error {
+	// Normalize query to uppercase for checking
+	upperQuery := strings.ToUpper(strings.TrimSpace(query))
+	
+	// List of write operation keywords that should be rejected
+	writeKeywords := []string{
+		"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+		"TRUNCATE", "REPLACE", "MERGE", "GRANT", "REVOKE",
+		"EXEC", "EXECUTE", "CALL",
+	}
+	
+	// Check if the query starts with any write operation
+	for _, keyword := range writeKeywords {
+		if strings.HasPrefix(upperQuery, keyword) {
+			return fmt.Errorf("write operations are not allowed in read-only mode: detected %s statement", keyword)
+		}
+		// Also check for write operations after comments or whitespace
+		if strings.Contains(upperQuery, ";"+keyword) || strings.Contains(upperQuery, "; "+keyword) {
+			return fmt.Errorf("write operations are not allowed in read-only mode: detected %s statement", keyword)
+		}
+	}
+	
+	// Additional check for common write patterns in the middle of queries
+	// This catches cases like "SELECT ... INTO", "WITH ... INSERT", etc.
+	dangerousPatterns := []string{
+		"INSERT INTO", "UPDATE ", "DELETE FROM", "DROP ", "CREATE ",
+		"ALTER ", "TRUNCATE ", "INTO OUTFILE", "INTO DUMPFILE",
+	}
+	
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(upperQuery, pattern) {
+			return fmt.Errorf("write operations are not allowed in read-only mode: detected '%s' pattern", pattern)
+		}
+	}
+	
+	// Check for SELECT INTO pattern (but allow INTO OUTFILE/DUMPFILE which are already caught)
+	if strings.Contains(upperQuery, " INTO ") {
+		// This could be SELECT INTO or INSERT INTO
+		// INSERT INTO is already checked, so this catches SELECT INTO
+		if !strings.Contains(upperQuery, "INSERT INTO") {
+			return fmt.Errorf("write operations are not allowed in read-only mode: detected 'INTO' clause")
+		}
+	}
+	
+	return nil
 }
 
 // cleanupRows ensures rows are closed properly

@@ -1,0 +1,17 @@
+{
+  "connections": [
+    {
+      "id": "test_db",
+      "type": "postgres",
+      "host": "localhost",
+      "port": 5432,
+      "name": "test",
+      "user": "test",
+      "password": "test"
+    }
+  ]
+}
+
+
+
+

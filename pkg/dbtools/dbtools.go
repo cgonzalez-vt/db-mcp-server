@@ -280,16 +280,16 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 		Handler: handleSchemaExplorer,
 	})
 
-	// Register query tool
+	// Register query tool (read-only)
 	registry.RegisterTool(&tools.Tool{
 		Name:        "dbQuery",
-		Description: "Execute SQL query and return results",
+		Description: "Execute read-only SQL query and return results (SELECT statements only)",
 		InputSchema: tools.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
 				"query": map[string]interface{}{
 					"type":        "string",
-					"description": "SQL query to execute",
+					"description": "Read-only SQL query to execute (SELECT statements only)",
 				},
 				"database": map[string]interface{}{
 					"type":        "string",
@@ -312,37 +312,7 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 		Handler: handleQuery,
 	})
 
-	// Register execute tool
-	registry.RegisterTool(&tools.Tool{
-		Name:        "dbExecute",
-		Description: "Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)",
-		InputSchema: tools.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"statement": map[string]interface{}{
-					"type":        "string",
-					"description": "SQL statement to execute",
-				},
-				"database": map[string]interface{}{
-					"type":        "string",
-					"description": "Database ID to query (optional if only one database is configured)",
-				},
-				"params": map[string]interface{}{
-					"type":        "array",
-					"description": "Parameters for the statement (for prepared statements)",
-					"items": map[string]interface{}{
-						"type": "string",
-					},
-				},
-				"timeout": map[string]interface{}{
-					"type":        "integer",
-					"description": "Statement timeout in milliseconds (default: 5000)",
-				},
-			},
-			Required: []string{"statement"},
-		},
-		Handler: handleExecute,
-	})
+	// dbExecute tool removed - read-only mode only
 
 	// Register list databases tool
 	registry.RegisterTool(&tools.Tool{
@@ -636,18 +606,18 @@ func RegisterMCPDatabaseTools(registry *tools.Registry) error {
 		return registerMCPMockTools(registry)
 	}
 
-	// Register MCP tools for each database
+	// Register MCP tools for each database (read-only tools only)
 	for _, dbID := range dbs {
-		// Register query tool for this database
+		// Register query tool for this database (read-only)
 		registry.RegisterTool(&tools.Tool{
 			Name:        fmt.Sprintf("query_%s", dbID),
-			Description: fmt.Sprintf("Execute SQL query on %s database", dbID),
+			Description: fmt.Sprintf("Execute read-only SQL query on %s database (SELECT only)", dbID),
 			InputSchema: tools.ToolInputSchema{
 				Type: "object",
 				Properties: map[string]interface{}{
 					"query": map[string]interface{}{
 						"type":        "string",
-						"description": "SQL query to execute",
+						"description": "Read-only SQL query to execute (SELECT statements only)",
 					},
 					"params": map[string]interface{}{
 						"type":        "array",
@@ -664,102 +634,7 @@ func RegisterMCPDatabaseTools(registry *tools.Registry) error {
 			},
 		})
 
-		// Register execute tool for this database
-		registry.RegisterTool(&tools.Tool{
-			Name:        fmt.Sprintf("execute_%s", dbID),
-			Description: fmt.Sprintf("Execute SQL statement on %s database", dbID),
-			InputSchema: tools.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]interface{}{
-					"statement": map[string]interface{}{
-						"type":        "string",
-						"description": "SQL statement to execute",
-					},
-					"params": map[string]interface{}{
-						"type":        "array",
-						"description": "Statement parameters",
-						"items": map[string]interface{}{
-							"type": "string",
-						},
-					},
-				},
-				Required: []string{"statement"},
-			},
-			Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-				return handleExecuteForDatabase(ctx, params, dbID)
-			},
-		})
-
-		// Register transaction tool for this database
-		registry.RegisterTool(&tools.Tool{
-			Name:        fmt.Sprintf("transaction_%s", dbID),
-			Description: fmt.Sprintf("Manage transactions on %s database", dbID),
-			InputSchema: tools.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]interface{}{
-					"action": map[string]interface{}{
-						"type":        "string",
-						"description": "Transaction action (begin, commit, rollback, execute)",
-						"enum":        []string{"begin", "commit", "rollback", "execute"},
-					},
-					"transactionId": map[string]interface{}{
-						"type":        "string",
-						"description": "Transaction ID (required for commit, rollback, execute)",
-					},
-					"statement": map[string]interface{}{
-						"type":        "string",
-						"description": "SQL statement to execute within transaction (required for execute)",
-					},
-					"params": map[string]interface{}{
-						"type":        "array",
-						"description": "Statement parameters",
-						"items": map[string]interface{}{
-							"type": "string",
-						},
-					},
-					"readOnly": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Whether the transaction is read-only (for begin)",
-					},
-				},
-				Required: []string{"action"},
-			},
-			Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-				return handleTransactionForDatabase(ctx, params, dbID)
-			},
-		})
-
-		// Register performance tool for this database
-		registry.RegisterTool(&tools.Tool{
-			Name:        fmt.Sprintf("performance_%s", dbID),
-			Description: fmt.Sprintf("Analyze query performance on %s database", dbID),
-			InputSchema: tools.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]interface{}{
-					"action": map[string]interface{}{
-						"type":        "string",
-						"description": "Action (getSlowQueries, getMetrics, analyzeQuery, reset, setThreshold)",
-						"enum":        []string{"getSlowQueries", "getMetrics", "analyzeQuery", "reset", "setThreshold"},
-					},
-					"query": map[string]interface{}{
-						"type":        "string",
-						"description": "SQL query to analyze (required for analyzeQuery)",
-					},
-					"threshold": map[string]interface{}{
-						"type":        "number",
-						"description": "Slow query threshold in milliseconds (required for setThreshold)",
-					},
-					"limit": map[string]interface{}{
-						"type":        "number",
-						"description": "Maximum number of results to return",
-					},
-				},
-				Required: []string{"action"},
-			},
-			Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-				return handlePerformanceForDatabase(ctx, params, dbID)
-			},
-		})
+		// execute, transaction, and performance tools removed - read-only mode only
 
 		// Register schema tool for this database
 		registry.RegisterTool(&tools.Tool{
@@ -884,6 +759,12 @@ func registerMCPMockTools(registry *tools.Registry) error {
 // Handler functions for specific databases
 func handleQueryForDatabase(ctx context.Context, params map[string]interface{}, dbID string) (interface{}, error) {
 	query, _ := getStringParam(params, "query")
+	
+	// Validate that the query is read-only
+	if err := validateReadOnlyQuery(query); err != nil {
+		return createErrorResponse(err.Error()), nil
+	}
+	
 	paramList, hasParams := getArrayParam(params, "params")
 
 	var queryParams []interface{}

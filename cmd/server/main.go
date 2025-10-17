@@ -177,13 +177,10 @@ func main() {
 
 	// If we have databases, display the available tools
 	if len(dbIDs) > 0 {
-		logger.Info("Available database tools:")
+		logger.Info("Available database tools (READ-ONLY MODE):")
 		for _, dbID := range dbIDs {
 			logger.Info("  Database %s:", dbID)
-			logger.Info("    - query_%s: Execute SQL queries", dbID)
-			logger.Info("    - execute_%s: Execute SQL statements", dbID)
-			logger.Info("    - transaction_%s: Manage transactions", dbID)
-			logger.Info("    - performance_%s: Analyze query performance", dbID)
+			logger.Info("    - query_%s: Execute read-only SQL queries (SELECT only)", dbID)
 			logger.Info("    - schema_%s: Get database schema", dbID)
 		}
 		logger.Info("  Common tools:")
