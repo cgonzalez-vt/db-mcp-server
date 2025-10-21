@@ -589,6 +589,24 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 		}
 	}
 	
+	// Add enum types if available
+	if enumTypes, ok := schema["enum_types"].(map[string][]string); ok && len(enumTypes) > 0 {
+		output.WriteString("\n=== Enum Types ===\n")
+		for enumName, values := range enumTypes {
+			output.WriteString(fmt.Sprintf("  %s: [%s]\n", enumName, strings.Join(values, ", ")))
+		}
+	}
+	
+	// Add table statistics summary if available
+	if detailedSchema, ok := schema["detailed_schema"].(map[string]interface{}); ok {
+		// Count total tables and columns
+		tableCount := len(detailedSchema)
+		if tableCount > 0 {
+			output.WriteString(fmt.Sprintf("\n=== Database Summary ===\n"))
+			output.WriteString(fmt.Sprintf("Total Tables: %d\n", tableCount))
+		}
+	}
+	
 	// Format detailed schema information
 	output.WriteString("\n=== Detailed Schema ===\n")
 	
@@ -608,13 +626,28 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 					colName := col["column_name"]
 					dataType := col["data_type"]
 					nullable := col["is_nullable"]
-					output.WriteString(fmt.Sprintf("    - %s (%s)%s\n", colName, dataType, 
-						func() string {
-							if nullable == "NO" {
-								return " NOT NULL"
-							}
-							return ""
-						}()))
+					
+					// Build column description
+					colDesc := fmt.Sprintf("    - %s (%s)", colName, dataType)
+					
+					// Add enum values if present
+					if enumValues, hasEnum := col["enum_values"]; hasEnum {
+						if enumVals, ok := enumValues.([]string); ok && len(enumVals) > 0 {
+							colDesc += fmt.Sprintf(" [%s]", strings.Join(enumVals, ", "))
+						}
+					}
+					
+					// Add NOT NULL constraint
+					if nullable == "NO" {
+						colDesc += " NOT NULL"
+					}
+					
+					// Add default value if present
+					if colDefault, hasDefault := col["column_default"]; hasDefault && colDefault != nil {
+						colDesc += fmt.Sprintf(" DEFAULT %v", colDefault)
+					}
+					
+					output.WriteString(colDesc + "\n")
 				}
 			}
 			
@@ -639,6 +672,17 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 				}
 			}
 			
+			// Unique Constraints
+			if uniqueConstraints, ok := tableSchema["unique_constraints"].([]map[string]interface{}); ok && len(uniqueConstraints) > 0 {
+				output.WriteString("  Unique Constraints:\n")
+				for _, uc := range uniqueConstraints {
+					constraintName := uc["constraint_name"]
+					columnNames := uc["column_names"]
+					constraintType := uc["constraint_type"]
+					output.WriteString(fmt.Sprintf("    - %s (%s): %s\n", constraintName, constraintType, columnNames))
+				}
+			}
+			
 			// Indexes
 			if indexes, ok := tableSchema["indexes"].([]map[string]interface{}); ok && len(indexes) > 0 {
 				output.WriteString("  Indexes:\n")
@@ -648,6 +692,13 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 					} else if idxName, ok := idx["index_name"].(string); ok {
 						output.WriteString(fmt.Sprintf("    - %s\n", idxName))
 					}
+				}
+			}
+			
+			// Table Statistics
+			if stats, ok := tableSchema["statistics"].(map[string]interface{}); ok && stats != nil {
+				if rowCount, ok := stats["row_count_estimate"]; ok && rowCount != nil {
+					output.WriteString(fmt.Sprintf("  Row Count (estimate): %v\n", rowCount))
 				}
 			}
 		}

@@ -60,11 +60,11 @@ docker-build-local:
 	docker build -t db-mcp-server:local .
 
 # Build multi-platform Docker image without pushing (for testing)
-# Usage: make docker-build-multiarch VERSION=v1.6.3
-# VERSION: Specify version tag (default: v1.6.3)
+# Usage: make docker-build-multiarch VERSION=v1.7.0
+# VERSION: Specify version tag (default: v1.7.0)
 docker-build-multiarch:
 	@echo "Building multi-architecture Docker image locally (linux/amd64,linux/arm64)..."
-	@VERSION=$${VERSION:-v1.6.3}; \
+	@VERSION=$${VERSION:-v1.7.0}; \
 	echo "Version: $$VERSION"; \
 	docker buildx create --name multiplatform-builder --use || true; \
 	docker buildx build --platform linux/amd64,linux/arm64 \
@@ -92,12 +92,12 @@ docker-pull-platform:
 	docker pull --platform $${DOCKER_PLATFORM:-linux/amd64} freepeak/db-mcp-server:latest
 
 # Build and deploy Docker image for current architecture only
-# Usage: make deploy-docker-simple VERSION=v1.6.3 LATEST=true
-# VERSION: Specify version tag (default: v1.6.3)
+# Usage: make deploy-docker-simple VERSION=v1.7.0 LATEST=true
+# VERSION: Specify version tag (default: v1.7.0)
 # LATEST: Whether to also tag as latest (default: true)
 deploy-docker-simple:
 	@echo "Building Docker image for current architecture..."
-	@VERSION=$${VERSION:-v1.6.3}; \
+	@VERSION=$${VERSION:-v1.7.0}; \
 	LATEST=$${LATEST:-true}; \
 	echo "Version: $$VERSION | Tag as latest: $$LATEST"; \
 	docker build -t freepeak/db-mcp-server:$$VERSION .; \
@@ -112,12 +112,12 @@ deploy-docker-simple:
 
 # Build and deploy multi-platform Docker image (AMD64 and ARM64)
 # Requires Docker Buildx: https://docs.docker.com/buildx/working-with-buildx/
-# Usage: make deploy-docker VERSION=v1.6.3 LATEST=true
-# VERSION: Specify version tag (default: v1.6.3)
+# Usage: make deploy-docker VERSION=v1.7.0 LATEST=true
+# VERSION: Specify version tag (default: v1.7.0)
 # LATEST: Whether to also tag as latest (default: true)
 deploy-docker:
 	@echo "Building multi-architecture Docker image (linux/amd64,linux/arm64)..."
-	@VERSION=$${VERSION:-v1.6.3}; \
+	@VERSION=$${VERSION:-v1.7.0}; \
 	LATEST=$${LATEST:-true}; \
 	echo "Version: $$VERSION | Tag as latest: $$LATEST"; \
 	if ! command -v docker buildx &> /dev/null; then \

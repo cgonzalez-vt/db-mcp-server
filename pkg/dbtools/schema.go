@@ -18,6 +18,9 @@ type DatabaseStrategy interface {
 	GetRelationshipsQueries(table string) []queryWithArgs
 	GetPrimaryKeysQueries(table string) []queryWithArgs
 	GetIndexesQueries(table string) []queryWithArgs
+	GetEnumValuesQueries() []queryWithArgs
+	GetUniqueConstraintsQueries(table string) []queryWithArgs
+	GetTableStatsQueries(table string) []queryWithArgs
 }
 
 // NewDatabaseStrategy creates the appropriate strategy for the given database type
@@ -51,12 +54,15 @@ func (s *PostgresStrategy) GetTablesQueries() []queryWithArgs {
 // GetColumnsQueries returns queries for retrieving columns in PostgreSQL
 func (s *PostgresStrategy) GetColumnsQueries(table string) []queryWithArgs {
 	return []queryWithArgs{
-		// Primary: information_schema approach for PostgreSQL
+		// Primary: information_schema approach for PostgreSQL with UDT name
 		{
 			query: `
-				SELECT column_name, data_type, 
-				CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
-				column_default
+				SELECT 
+					column_name, 
+					data_type,
+					udt_name,
+					CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
+					column_default
 				FROM information_schema.columns 
 				WHERE table_name = $1 AND table_schema = 'public'
 				ORDER BY ordinal_position
@@ -66,12 +72,15 @@ func (s *PostgresStrategy) GetColumnsQueries(table string) []queryWithArgs {
 		// Secondary: pg_catalog approach for PostgreSQL
 		{
 			query: `
-				SELECT a.attname as column_name, 
-				pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
-				CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as is_nullable,
-				pg_catalog.pg_get_expr(d.adbin, d.adrelid) as column_default
+				SELECT 
+					a.attname as column_name, 
+					pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
+					t.typname as udt_name,
+					CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as is_nullable,
+					pg_catalog.pg_get_expr(d.adbin, d.adrelid) as column_default
 				FROM pg_catalog.pg_attribute a
 				LEFT JOIN pg_catalog.pg_attrdef d ON (a.attrelid = d.adrelid AND a.attnum = d.adnum)
+				LEFT JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
 				WHERE a.attrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = $1 AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public'))
 				AND a.attnum > 0 AND NOT a.attisdropped
 				ORDER BY a.attnum
@@ -228,6 +237,116 @@ func (s *PostgresStrategy) GetIndexesQueries(table string) []queryWithArgs {
 	}
 }
 
+// GetEnumValuesQueries returns queries for retrieving ENUM type values in PostgreSQL
+func (s *PostgresStrategy) GetEnumValuesQueries() []queryWithArgs {
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					t.typname as enum_name,
+					n.nspname as schema_name,
+					e.enumlabel as enum_value,
+					e.enumsortorder as sort_order
+				FROM pg_type t
+				JOIN pg_enum e ON t.oid = e.enumtypid
+				JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+				WHERE n.nspname = 'public'
+				ORDER BY t.typname, e.enumsortorder
+			`,
+			args: []interface{}{},
+		},
+	}
+}
+
+// GetUniqueConstraintsQueries returns queries for retrieving unique constraints in PostgreSQL
+func (s *PostgresStrategy) GetUniqueConstraintsQueries(table string) []queryWithArgs {
+	if table == "" {
+		return []queryWithArgs{{
+			query: `
+				SELECT 
+					tc.table_name,
+					tc.constraint_name,
+					tc.constraint_type,
+					STRING_AGG(kcu.column_name, ', ' ORDER BY kcu.ordinal_position) as column_names
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu 
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				WHERE tc.constraint_type IN ('UNIQUE', 'PRIMARY KEY') 
+					AND tc.table_schema = 'public'
+				GROUP BY tc.table_name, tc.constraint_name, tc.constraint_type
+				ORDER BY tc.table_name, tc.constraint_name
+			`,
+			args: []interface{}{},
+		}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					tc.table_name,
+					tc.constraint_name,
+					tc.constraint_type,
+					STRING_AGG(kcu.column_name, ', ' ORDER BY kcu.ordinal_position) as column_names
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu 
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				WHERE tc.constraint_type IN ('UNIQUE', 'PRIMARY KEY') 
+					AND tc.table_schema = 'public'
+					AND tc.table_name = $1
+				GROUP BY tc.table_name, tc.constraint_name, tc.constraint_type
+				ORDER BY tc.constraint_name
+			`,
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetTableStatsQueries returns queries for retrieving table statistics in PostgreSQL
+func (s *PostgresStrategy) GetTableStatsQueries(table string) []queryWithArgs {
+	if table == "" {
+		return []queryWithArgs{{
+			query: `
+				SELECT 
+					schemaname,
+					relname as table_name,
+					n_live_tup as row_count_estimate,
+					n_dead_tup as dead_tuples,
+					last_vacuum,
+					last_autovacuum,
+					last_analyze,
+					last_autoanalyze
+				FROM pg_stat_user_tables
+				WHERE schemaname = 'public'
+				ORDER BY relname
+			`,
+			args: []interface{}{},
+		}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					schemaname,
+					relname as table_name,
+					n_live_tup as row_count_estimate,
+					n_dead_tup as dead_tuples,
+					last_vacuum,
+					last_autovacuum,
+					last_analyze,
+					last_autoanalyze
+				FROM pg_stat_user_tables
+				WHERE schemaname = 'public'
+					AND relname = $1
+			`,
+			args:  []interface{}{table},
+		},
+	}
+}
+
 // MySQLStrategy implements DatabaseStrategy for MySQL
 type MySQLStrategy struct{}
 
@@ -378,6 +497,84 @@ func (s *MySQLStrategy) GetIndexesQueries(table string) []queryWithArgs {
 	}
 }
 
+// GetEnumValuesQueries returns queries for retrieving ENUM type values in MySQL
+func (s *MySQLStrategy) GetEnumValuesQueries() []queryWithArgs {
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					c.table_name,
+					c.column_name as enum_name,
+					c.column_type as enum_definition
+				FROM information_schema.columns c
+				WHERE c.table_schema = DATABASE()
+					AND c.column_type LIKE 'enum(%'
+				ORDER BY c.table_name, c.column_name
+			`,
+			args: []interface{}{},
+		},
+	}
+}
+
+// GetUniqueConstraintsQueries returns queries for retrieving unique constraints in MySQL
+func (s *MySQLStrategy) GetUniqueConstraintsQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			tc.table_name,
+			tc.constraint_name,
+			tc.constraint_type,
+			GROUP_CONCAT(kcu.column_name ORDER BY kcu.ordinal_position) as column_names
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu 
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		WHERE tc.constraint_type IN ('UNIQUE', 'PRIMARY KEY') 
+			AND tc.table_schema = DATABASE()
+		GROUP BY tc.table_name, tc.constraint_name, tc.constraint_type
+		ORDER BY tc.table_name, tc.constraint_name
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " HAVING tc.table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetTableStatsQueries returns queries for retrieving table statistics in MySQL
+func (s *MySQLStrategy) GetTableStatsQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			table_schema,
+			table_name,
+			table_rows as row_count_estimate,
+			data_length,
+			index_length,
+			data_free,
+			create_time,
+			update_time
+		FROM information_schema.tables
+		WHERE table_schema = DATABASE()
+		ORDER BY table_name
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " AND table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
 // GenericStrategy implements DatabaseStrategy for unknown database types
 type GenericStrategy struct{}
 
@@ -514,6 +711,120 @@ func (s *GenericStrategy) GetIndexesQueries(table string) []queryWithArgs {
 			args:  []interface{}{table},
 		},
 	}
+}
+
+// GetEnumValuesQueries returns queries for retrieving ENUM type values (generic)
+func (s *GenericStrategy) GetEnumValuesQueries() []queryWithArgs {
+	// Try PostgreSQL first, then MySQL
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					t.typname as enum_name,
+					n.nspname as schema_name,
+					e.enumlabel as enum_value,
+					e.enumsortorder as sort_order
+				FROM pg_type t
+				JOIN pg_enum e ON t.oid = e.enumtypid
+				JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+				WHERE n.nspname = 'public'
+				ORDER BY t.typname, e.enumsortorder
+			`,
+			args: []interface{}{},
+		},
+		{
+			query: `
+				SELECT 
+					c.table_name,
+					c.column_name as enum_name,
+					c.column_type as enum_definition
+				FROM information_schema.columns c
+				WHERE c.table_schema = DATABASE()
+					AND c.column_type LIKE 'enum(%'
+				ORDER BY c.table_name, c.column_name
+			`,
+			args: []interface{}{},
+		},
+	}
+}
+
+// GetUniqueConstraintsQueries returns queries for retrieving unique constraints (generic)
+func (s *GenericStrategy) GetUniqueConstraintsQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			tc.table_name,
+			tc.constraint_name,
+			tc.constraint_type,
+			kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu 
+			ON tc.constraint_name = kcu.constraint_name
+		WHERE tc.constraint_type IN ('UNIQUE', 'PRIMARY KEY')
+		ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " AND tc.table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetTableStatsQueries returns queries for retrieving table statistics (generic)
+func (s *GenericStrategy) GetTableStatsQueries(table string) []queryWithArgs {
+	// Try PostgreSQL first
+	pgQuery := queryWithArgs{
+		query: `
+			SELECT 
+				schemaname,
+				relname as table_name,
+				n_live_tup as row_count_estimate,
+				n_dead_tup as dead_tuples,
+				last_vacuum,
+				last_autovacuum,
+				last_analyze,
+				last_autoanalyze
+			FROM pg_stat_user_tables
+			WHERE schemaname = 'public'
+		`,
+		args: []interface{}{},
+	}
+	
+	// MySQL fallback
+	mysqlQuery := queryWithArgs{
+		query: `
+			SELECT 
+				table_schema,
+				table_name,
+				table_rows as row_count_estimate,
+				data_length,
+				index_length,
+				data_free,
+				create_time,
+				update_time
+			FROM information_schema.tables
+			WHERE table_schema = DATABASE()
+		`,
+		args: []interface{}{},
+	}
+	
+	if table != "" {
+		pgQuery.query += " AND relname = $1"
+		pgQuery.args = append(pgQuery.args, table)
+		
+		mysqlQuery.query += " AND table_name = ?"
+		mysqlQuery.args = append(mysqlQuery.args, table)
+	} else {
+		pgQuery.query += " ORDER BY relname"
+		mysqlQuery.query += " ORDER BY table_name"
+	}
+	
+	return []queryWithArgs{pgQuery, mysqlQuery}
 }
 
 // createSchemaExplorerTool creates a tool for exploring database schema
@@ -823,6 +1134,115 @@ func getIndexes(ctx context.Context, db db.Database, table string) (interface{},
 	}, nil
 }
 
+// getEnumValues retrieves ENUM type definitions and their values
+func getEnumValues(ctx context.Context, db db.Database) (interface{}, error) {
+	driverName := db.DriverName()
+	dbType := driverName
+
+	strategy := NewDatabaseStrategy(driverName)
+	queries := strategy.GetEnumValuesQueries()
+
+	rows, err := executeWithFallbacks(ctx, db, queries, "getEnumValues")
+	if err != nil {
+		// Don't fail if enums aren't supported, just return empty result
+		logger.Warn("Failed to get enum values (may not be supported): %v", err)
+		return map[string]interface{}{
+			"enums":  []map[string]interface{}{},
+			"dbType": dbType,
+		}, nil
+	}
+
+	defer func() {
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
+		}
+	}()
+
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process enum values: %w", err)
+	}
+
+	return map[string]interface{}{
+		"enums":  results,
+		"dbType": dbType,
+	}, nil
+}
+
+// getUniqueConstraints retrieves unique constraints for a table or all tables
+func getUniqueConstraints(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	driverName := db.DriverName()
+	dbType := driverName
+
+	strategy := NewDatabaseStrategy(driverName)
+	queries := strategy.GetUniqueConstraintsQueries(table)
+
+	rows, err := executeWithFallbacks(ctx, db, queries, "getUniqueConstraints")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unique constraints: %w", err)
+	}
+
+	defer func() {
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
+		}
+	}()
+
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process unique constraints: %w", err)
+	}
+
+	return map[string]interface{}{
+		"unique_constraints": results,
+		"dbType":             dbType,
+		"table":              table,
+	}, nil
+}
+
+// getTableStats retrieves table statistics (row counts, etc.)
+func getTableStats(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	driverName := db.DriverName()
+	dbType := driverName
+
+	strategy := NewDatabaseStrategy(driverName)
+	queries := strategy.GetTableStatsQueries(table)
+
+	rows, err := executeWithFallbacks(ctx, db, queries, "getTableStats")
+	if err != nil {
+		// Don't fail if stats aren't available
+		logger.Warn("Failed to get table stats: %v", err)
+		return map[string]interface{}{
+			"stats":  []map[string]interface{}{},
+			"dbType": dbType,
+			"table":  table,
+		}, nil
+	}
+
+	defer func() {
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
+		}
+	}()
+
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process table stats: %w", err)
+	}
+
+	return map[string]interface{}{
+		"stats":  results,
+		"dbType": dbType,
+		"table":  table,
+	}, nil
+}
+
 // safeGetMap safely gets a map from an interface value
 func safeGetMap(obj interface{}) (map[string]interface{}, error) {
 	if obj == nil {
@@ -869,6 +1289,49 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		return nil, fmt.Errorf("invalid tables data format")
 	}
 
+	// Get ENUM values for all types
+	enumsResult, enumsErr := getEnumValues(ctx, db)
+	var enumValues []map[string]interface{}
+	var enumsByType map[string][]string
+	if enumsErr != nil {
+		logger.Warn("Failed to get enum values: %v", enumsErr)
+		enumValues = []map[string]interface{}{}
+		enumsByType = make(map[string][]string)
+	} else {
+		enumsMap, _ := safeGetMap(enumsResult)
+		if enums, ok := enumsMap["enums"].([]map[string]interface{}); ok {
+			enumValues = enums
+		}
+		
+		// Organize enum values by type name for easy lookup
+		enumsByType = make(map[string][]string)
+		for _, enum := range enumValues {
+			if enumName, ok := enum["enum_name"].(string); ok {
+				if enumValue, ok := enum["enum_value"].(string); ok {
+					enumsByType[enumName] = append(enumsByType[enumName], enumValue)
+				}
+			}
+		}
+	}
+
+	// Get table statistics for all tables
+	statsResult, statsErr := getTableStats(ctx, db, "")
+	var statsByTable map[string]map[string]interface{}
+	if statsErr != nil {
+		logger.Warn("Failed to get table stats: %v", statsErr)
+		statsByTable = make(map[string]map[string]interface{})
+	} else {
+		statsMap, _ := safeGetMap(statsResult)
+		if stats, ok := statsMap["stats"].([]map[string]interface{}); ok {
+			statsByTable = make(map[string]map[string]interface{})
+			for _, stat := range stats {
+				if tableName, ok := stat["table_name"].(string); ok {
+					statsByTable[tableName] = stat
+				}
+			}
+		}
+	}
+
 	// For each table, get detailed information
 	detailedSchema := make(map[string]interface{})
 	for _, tableInfo := range tablesSlice {
@@ -885,6 +1348,27 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		}
 		
 		columnsMap, _ := safeGetMap(columnsResult)
+		
+		// Enhance columns with enum values
+		if columns, ok := columnsMap["columns"].([]map[string]interface{}); ok {
+			for i, column := range columns {
+				dataType, _ := column["data_type"].(string)
+				udtName, hasUdtName := column["udt_name"].(string)
+				
+				// For USER-DEFINED types, use the udt_name to look up enum values
+				if dataType == "USER-DEFINED" && hasUdtName {
+					if enumVals, exists := enumsByType[udtName]; exists {
+						columns[i]["enum_values"] = enumVals
+						columns[i]["enum_type"] = udtName
+					}
+				} else {
+					// For other types, check by data_type
+					if enumVals, exists := enumsByType[dataType]; exists {
+						columns[i]["enum_values"] = enumVals
+					}
+				}
+			}
+		}
 		
 		// Get primary keys for this table
 		primaryKeysResult, pkErr := getPrimaryKeys(ctx, db, tableName)
@@ -911,12 +1395,33 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 				indexes = idxs
 			}
 		}
+		
+		// Get unique constraints for this table
+		uniqueConstraintsResult, ucErr := getUniqueConstraints(ctx, db, tableName)
+		var uniqueConstraints []map[string]interface{}
+		if ucErr != nil {
+			logger.Warn("Failed to get unique constraints for table %s: %v", tableName, ucErr)
+			uniqueConstraints = []map[string]interface{}{}
+		} else {
+			ucMap, _ := safeGetMap(uniqueConstraintsResult)
+			if ucs, ok := ucMap["unique_constraints"].([]map[string]interface{}); ok {
+				uniqueConstraints = ucs
+			}
+		}
+
+		// Get table statistics
+		tableStats := statsByTable[tableName]
+		if tableStats == nil {
+			tableStats = make(map[string]interface{})
+		}
 
 		// Build detailed table schema
 		detailedSchema[tableName] = map[string]interface{}{
-			"columns":      columnsMap["columns"],
-			"primary_keys": primaryKeys,
-			"indexes":      indexes,
+			"columns":            columnsMap["columns"],
+			"primary_keys":       primaryKeys,
+			"indexes":            indexes,
+			"unique_constraints": uniqueConstraints,
+			"statistics":         tableStats,
 		}
 	}
 
@@ -952,5 +1457,7 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		"tables":          tablesSlice,
 		"detailed_schema": detailedSchema,
 		"foreign_keys":    foreignKeys,
+		"enum_types":      enumsByType,
+		"enum_values":     enumValues,
 	}, nil
 }
