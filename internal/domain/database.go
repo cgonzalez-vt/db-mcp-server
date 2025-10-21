@@ -111,4 +111,6 @@ type DatabaseRepository interface {
 	GetDatabase(id string) (Database, error)
 	ListDatabases() []string
 	GetDatabaseType(id string) (string, error)
+	GetDatabaseMetadata(id string) (map[string]interface{}, error)
+	GetDetailedSchema(id string) (map[string]interface{}, error)
 }

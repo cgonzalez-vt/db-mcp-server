@@ -11,13 +11,20 @@ import (
 
 // DatabaseConnectionConfig represents a single database connection configuration
 type DatabaseConnectionConfig struct {
-	ID       string `json:"id"`   // Unique identifier for this connection
+	ID       string `json:"id"`   // Unique identifier for this connection (short, used for tool names)
 	Type     string `json:"type"` // mysql or postgres
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+
+	// Display metadata (for MCP client context)
+	DisplayName string   `json:"display_name,omitempty"` // Full descriptive name (e.g., "Transaction Service Production Database")
+	Project     string   `json:"project,omitempty"`      // Project identifier (e.g., "transaction-service")
+	Environment string   `json:"environment,omitempty"`  // Environment (e.g., "production", "staging", "dev")
+	Description string   `json:"description,omitempty"`  // Detailed description
+	Tags        []string `json:"tags,omitempty"`         // Tags for categorization
 
 	// PostgreSQL specific options
 	SSLMode            string            `json:"ssl_mode,omitempty"`
@@ -47,6 +54,14 @@ type Manager struct {
 	mu          sync.RWMutex
 	connections map[string]Database
 	configs     map[string]DatabaseConnectionConfig
+}
+
+// GetMetadata returns the metadata for a database connection
+func (m *Manager) GetMetadata(id string) (DatabaseConnectionConfig, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	config, ok := m.configs[id]
+	return config, ok
 }
 
 // NewDBManager creates a new database manager

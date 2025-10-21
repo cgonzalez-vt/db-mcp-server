@@ -342,3 +342,19 @@ func timeNowUnix() int64 {
 func (uc *DatabaseUseCase) GetDatabaseType(dbID string) (string, error) {
 	return uc.repo.GetDatabaseType(dbID)
 }
+
+// GetDatabaseMetadata returns metadata about a database connection
+func (uc *DatabaseUseCase) GetDatabaseMetadata(dbID string) (map[string]interface{}, error) {
+	return uc.repo.GetDatabaseMetadata(dbID)
+}
+
+// GetDetailedDatabaseSchema returns comprehensive schema information with caching
+func (uc *DatabaseUseCase) GetDetailedDatabaseSchema(dbID string) (map[string]interface{}, error) {
+	// The caching is already handled in the repository layer (dbtools.GetDetailedSchema)
+	schema, err := uc.repo.GetDetailedSchema(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get detailed schema: %w", err)
+	}
+	
+	return schema, nil
+}

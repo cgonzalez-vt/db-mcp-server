@@ -153,6 +153,11 @@ func (tr *ToolRegistry) registerTool(ctx context.Context, toolTypeName string, n
 		return fmt.Errorf("failed to get tool type for '%s'", toolTypeName)
 	}
 
+	// Inject use case for metadata access if the tool type supports it
+	if baseType, ok := toolTypeImpl.(interface{ SetUseCase(UseCaseProvider) }); ok {
+		baseType.SetUseCase(tr.databaseUseCase)
+	}
+
 	tool := toolTypeImpl.CreateTool(name, dbID)
 
 	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {

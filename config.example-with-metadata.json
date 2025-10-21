@@ -1,0 +1,61 @@
+{
+  "connections": [
+    {
+      "id": "ts_prod",
+      "type": "postgres",
+      "host": "transaction-db.prod.example.com",
+      "port": 5432,
+      "name": "transactions",
+      "user": "app_user",
+      "password": "your-password-here",
+      "display_name": "Transaction Service Production",
+      "project": "transaction-service",
+      "environment": "production",
+      "description": "Main production database for transaction processing service",
+      "tags": ["production", "critical", "transactions", "payments"]
+    },
+    {
+      "id": "ts_stage",
+      "type": "postgres",
+      "host": "transaction-db.stage.example.com",
+      "port": 5432,
+      "name": "transactions",
+      "user": "app_user",
+      "password": "your-password-here",
+      "display_name": "Transaction Service Staging",
+      "project": "transaction-service",
+      "environment": "staging",
+      "description": "Staging database for transaction service testing",
+      "tags": ["staging", "transactions", "testing"]
+    },
+    {
+      "id": "usr_prod",
+      "type": "postgres",
+      "host": "user-db.prod.example.com",
+      "port": 5432,
+      "name": "users",
+      "user": "app_user",
+      "password": "your-password-here",
+      "display_name": "User Service Production",
+      "project": "user-service",
+      "environment": "production",
+      "description": "Production user authentication and profile database",
+      "tags": ["production", "users", "auth"]
+    },
+    {
+      "id": "ord_prod",
+      "type": "mysql",
+      "host": "order-db.prod.example.com",
+      "port": 3306,
+      "name": "orders",
+      "user": "app_user",
+      "password": "your-password-here",
+      "display_name": "Order Management Production",
+      "project": "order-service",
+      "environment": "production",
+      "description": "Production database for order processing and fulfillment",
+      "tags": ["production", "orders", "e-commerce"]
+    }
+  ]
+}
+

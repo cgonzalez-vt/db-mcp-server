@@ -68,12 +68,15 @@ type UseCaseProvider interface {
 	GetDatabaseInfo(dbID string) (map[string]interface{}, error)
 	ListDatabases() []string
 	GetDatabaseType(dbID string) (string, error)
+	GetDatabaseMetadata(dbID string) (map[string]interface{}, error)
+	GetDetailedDatabaseSchema(dbID string) (map[string]interface{}, error)
 }
 
 // BaseToolType provides common functionality for tool types
 type BaseToolType struct {
 	name        string
 	description string
+	useCase     UseCaseProvider
 }
 
 // GetName returns the name of the tool type
@@ -83,7 +86,42 @@ func (b *BaseToolType) GetName() string {
 
 // GetDescription returns a description for the tool type
 func (b *BaseToolType) GetDescription(dbID string) string {
-	return fmt.Sprintf("%s on %s database", b.description, dbID)
+	// Default description
+	desc := fmt.Sprintf("%s on %s database", b.description, dbID)
+	
+	// Try to enhance with metadata if available
+	if b.useCase != nil {
+		metadata, err := b.useCase.GetDatabaseMetadata(dbID)
+		if err == nil && metadata != nil {
+			// Build enhanced description
+			if displayName, ok := metadata["display_name"].(string); ok && displayName != "" {
+				desc = fmt.Sprintf("%s on %s database", b.description, displayName)
+			}
+			
+			// Add project and environment context if available
+			var contextParts []string
+			if project, ok := metadata["project"].(string); ok && project != "" {
+				contextParts = append(contextParts, fmt.Sprintf("Project: %s", project))
+			}
+			if env, ok := metadata["environment"].(string); ok && env != "" {
+				contextParts = append(contextParts, fmt.Sprintf("Environment: %s", env))
+			}
+			if description, ok := metadata["description"].(string); ok && description != "" {
+				contextParts = append(contextParts, description)
+			}
+			
+			if len(contextParts) > 0 {
+				desc = desc + " (" + strings.Join(contextParts, ", ") + ")"
+			}
+		}
+	}
+	
+	return desc
+}
+
+// SetUseCase sets the use case provider for metadata access
+func (b *BaseToolType) SetUseCase(useCase UseCaseProvider) {
+	b.useCase = useCase
 }
 
 //------------------------------------------------------------------------------
@@ -516,14 +554,106 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 		dbID = extractDatabaseIDFromName(request.Name)
 	}
 
-	info, err := useCase.GetDatabaseInfo(dbID)
+	// Get detailed schema with caching
+	schema, err := useCase.GetDetailedDatabaseSchema(dbID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Format response text
-	infoStr := fmt.Sprintf("Database Schema for %s:\n\n%+v", dbID, info)
-	return createTextResponse(infoStr), nil
+	// Format response text with metadata and detailed schema
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("Database Schema for %s\n", dbID))
+	
+	// Add metadata if available
+	if metadata, err := useCase.GetDatabaseMetadata(dbID); err == nil && metadata != nil {
+		output.WriteString("\n=== Database Metadata ===\n")
+		
+		if displayName, ok := metadata["display_name"].(string); ok && displayName != "" {
+			output.WriteString(fmt.Sprintf("Display Name: %s\n", displayName))
+		}
+		
+		if project, ok := metadata["project"].(string); ok && project != "" {
+			output.WriteString(fmt.Sprintf("Project: %s\n", project))
+		}
+		
+		if env, ok := metadata["environment"].(string); ok && env != "" {
+			output.WriteString(fmt.Sprintf("Environment: %s\n", env))
+		}
+		
+		if description, ok := metadata["description"].(string); ok && description != "" {
+			output.WriteString(fmt.Sprintf("Description: %s\n", description))
+		}
+		
+		if tags, ok := metadata["tags"].([]string); ok && len(tags) > 0 {
+			output.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(tags, ", ")))
+		}
+	}
+	
+	// Format detailed schema information
+	output.WriteString("\n=== Detailed Schema ===\n")
+	
+	if detailedSchema, ok := schema["detailed_schema"].(map[string]interface{}); ok {
+		for tableName, tableSchemaInterface := range detailedSchema {
+			tableSchema, ok := tableSchemaInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			output.WriteString(fmt.Sprintf("\nTable: %s\n", tableName))
+			
+			// Columns
+			if columns, ok := tableSchema["columns"].([]map[string]interface{}); ok && len(columns) > 0 {
+				output.WriteString("  Columns:\n")
+				for _, col := range columns {
+					colName := col["column_name"]
+					dataType := col["data_type"]
+					nullable := col["is_nullable"]
+					output.WriteString(fmt.Sprintf("    - %s (%s)%s\n", colName, dataType, 
+						func() string {
+							if nullable == "NO" {
+								return " NOT NULL"
+							}
+							return ""
+						}()))
+				}
+			}
+			
+			// Primary Keys
+			if primaryKeys, ok := tableSchema["primary_keys"].([]map[string]interface{}); ok && len(primaryKeys) > 0 {
+				output.WriteString("  Primary Keys:\n")
+				for _, pk := range primaryKeys {
+					if colName, ok := pk["column_name"].(string); ok {
+						output.WriteString(fmt.Sprintf("    - %s\n", colName))
+					}
+				}
+			}
+			
+			// Foreign Keys
+			if foreignKeys, ok := tableSchema["foreign_keys"].([]map[string]interface{}); ok && len(foreignKeys) > 0 {
+				output.WriteString("  Foreign Keys:\n")
+				for _, fk := range foreignKeys {
+					colName := fk["column_name"]
+					refTable := fk["foreign_table_name"]
+					refCol := fk["foreign_column_name"]
+					output.WriteString(fmt.Sprintf("    - %s -> %s.%s\n", colName, refTable, refCol))
+				}
+			}
+			
+			// Indexes
+			if indexes, ok := tableSchema["indexes"].([]map[string]interface{}); ok && len(indexes) > 0 {
+				output.WriteString("  Indexes:\n")
+				for _, idx := range indexes {
+					if idxName, ok := idx["indexname"].(string); ok {
+						output.WriteString(fmt.Sprintf("    - %s\n", idxName))
+					} else if idxName, ok := idx["index_name"].(string); ok {
+						output.WriteString(fmt.Sprintf("    - %s\n", idxName))
+					}
+				}
+			}
+		}
+	}
+	
+	return createTextResponse(output.String()), nil
 }
 
 //------------------------------------------------------------------------------
@@ -561,10 +691,41 @@ func (t *ListDatabasesTool) CreateTool(name string, dbID string) interface{} {
 func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
 	databases := useCase.ListDatabases()
 
-	// Format as text for display
+	// Format as text for display with metadata
 	output := "Available databases:\n\n"
 	for i, db := range databases {
-		output += fmt.Sprintf("%d. %s\n", i+1, db)
+		output += fmt.Sprintf("%d. %s", i+1, db)
+		
+		// Try to get and display metadata
+		if metadata, err := useCase.GetDatabaseMetadata(db); err == nil && metadata != nil {
+			var details []string
+			
+			if displayName, ok := metadata["display_name"].(string); ok && displayName != "" {
+				details = append(details, fmt.Sprintf("Name: %s", displayName))
+			}
+			
+			if project, ok := metadata["project"].(string); ok && project != "" {
+				details = append(details, fmt.Sprintf("Project: %s", project))
+			}
+			
+			if env, ok := metadata["environment"].(string); ok && env != "" {
+				details = append(details, fmt.Sprintf("Environment: %s", env))
+			}
+			
+			if description, ok := metadata["description"].(string); ok && description != "" {
+				details = append(details, fmt.Sprintf("Description: %s", description))
+			}
+			
+			if tags, ok := metadata["tags"].([]string); ok && len(tags) > 0 {
+				details = append(details, fmt.Sprintf("Tags: %s", strings.Join(tags, ", ")))
+			}
+			
+			if len(details) > 0 {
+				output += "\n   " + strings.Join(details, "\n   ")
+			}
+		}
+		
+		output += "\n\n"
 	}
 
 	if len(databases) == 0 {

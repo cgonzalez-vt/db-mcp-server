@@ -48,6 +48,13 @@ type ConnectionConfig struct {
 	Name     string       `json:"name"`
 	User     string       `json:"user"`
 	Password string       `json:"password"`
+	
+	// Display metadata (for MCP client context)
+	DisplayName string   `json:"display_name,omitempty"`
+	Project     string   `json:"project,omitempty"`
+	Environment string   `json:"environment,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 // MultiDBConfig represents configuration for multiple database connections
@@ -212,6 +219,53 @@ func ListDatabases() []string {
 		return nil
 	}
 	return dbManager.ListDatabases()
+}
+
+// GetDatabaseMetadata returns metadata about a database connection
+func GetDatabaseMetadata(id string) (db.DatabaseConnectionConfig, error) {
+	if dbManager == nil {
+		return db.DatabaseConnectionConfig{}, fmt.Errorf("database manager not initialized")
+	}
+	config, ok := dbManager.GetMetadata(id)
+	if !ok {
+		return db.DatabaseConnectionConfig{}, fmt.Errorf("database not found: %s", id)
+	}
+	return config, nil
+}
+
+// GetDetailedSchema returns comprehensive schema information with caching
+func GetDetailedSchema(dbID string) (map[string]interface{}, error) {
+	// Check cache first
+	cache := GetSchemaCache()
+	if cachedSchema, ok := cache.Get(dbID); ok {
+		if schema, ok := cachedSchema.(map[string]interface{}); ok {
+			return schema, nil
+		}
+	}
+
+	// Get database connection
+	database, err := GetDatabase(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Query the full schema
+	ctx := context.Background()
+	schema, err := getFullSchema(ctx, database)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get full schema: %w", err)
+	}
+
+	// Convert to map
+	schemaMap, ok := schema.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid schema format")
+	}
+
+	// Cache the result
+	cache.Set(dbID, schemaMap)
+
+	return schemaMap, nil
 }
 
 // showConnectedDatabases returns information about all connected databases

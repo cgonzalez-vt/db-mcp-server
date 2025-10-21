@@ -60,6 +60,32 @@ func (r *DatabaseRepository) GetDatabaseType(id string) (string, error) {
 	}
 }
 
+// GetDatabaseMetadata returns metadata about a database connection
+func (r *DatabaseRepository) GetDatabaseMetadata(id string) (map[string]interface{}, error) {
+	metadata, err := dbtools.GetDatabaseMetadata(id)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Convert to map for easier handling
+	result := map[string]interface{}{
+		"id":           metadata.ID,
+		"type":         metadata.Type,
+		"display_name": metadata.DisplayName,
+		"project":      metadata.Project,
+		"environment":  metadata.Environment,
+		"description":  metadata.Description,
+		"tags":         metadata.Tags,
+	}
+	
+	return result, nil
+}
+
+// GetDetailedSchema retrieves comprehensive schema information from the database
+func (r *DatabaseRepository) GetDetailedSchema(id string) (map[string]interface{}, error) {
+	return dbtools.GetDetailedSchema(id)
+}
+
 // DatabaseAdapter adapts the db.Database to the domain.Database interface
 type DatabaseAdapter struct {
 	db interface {

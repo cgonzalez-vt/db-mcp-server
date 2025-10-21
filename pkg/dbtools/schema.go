@@ -16,6 +16,8 @@ type DatabaseStrategy interface {
 	GetTablesQueries() []queryWithArgs
 	GetColumnsQueries(table string) []queryWithArgs
 	GetRelationshipsQueries(table string) []queryWithArgs
+	GetPrimaryKeysQueries(table string) []queryWithArgs
+	GetIndexesQueries(table string) []queryWithArgs
 }
 
 // NewDatabaseStrategy creates the appropriate strategy for the given database type
@@ -150,6 +152,82 @@ func (s *PostgresStrategy) GetRelationshipsQueries(table string) []queryWithArgs
 	return queries
 }
 
+// GetPrimaryKeysQueries returns queries for retrieving primary keys in PostgreSQL
+func (s *PostgresStrategy) GetPrimaryKeysQueries(table string) []queryWithArgs {
+	if table == "" {
+		return []queryWithArgs{{
+			query: `
+				SELECT 
+					tc.table_name,
+					kcu.column_name,
+					tc.constraint_name
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu 
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				WHERE tc.constraint_type = 'PRIMARY KEY' 
+					AND tc.table_schema = 'public'
+				ORDER BY tc.table_name, kcu.ordinal_position
+			`,
+			args: []interface{}{},
+		}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					tc.table_name,
+					kcu.column_name,
+					tc.constraint_name
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu 
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				WHERE tc.constraint_type = 'PRIMARY KEY' 
+					AND tc.table_schema = 'public'
+					AND tc.table_name = $1
+				ORDER BY kcu.ordinal_position
+			`,
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetIndexesQueries returns queries for retrieving indexes in PostgreSQL
+func (s *PostgresStrategy) GetIndexesQueries(table string) []queryWithArgs {
+	if table == "" {
+		return []queryWithArgs{{
+			query: `
+				SELECT 
+					tablename,
+					indexname,
+					indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				ORDER BY tablename, indexname
+			`,
+			args: []interface{}{},
+		}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: `
+				SELECT 
+					tablename,
+					indexname,
+					indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+					AND tablename = $1
+				ORDER BY indexname
+			`,
+			args:  []interface{}{table},
+		},
+	}
+}
+
 // MySQLStrategy implements DatabaseStrategy for MySQL
 type MySQLStrategy struct{}
 
@@ -246,6 +324,60 @@ func (s *MySQLStrategy) GetRelationshipsQueries(table string) []queryWithArgs {
 	return queries
 }
 
+// GetPrimaryKeysQueries returns queries for retrieving primary keys in MySQL
+func (s *MySQLStrategy) GetPrimaryKeysQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			tc.table_name,
+			kcu.column_name,
+			tc.constraint_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu 
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		WHERE tc.constraint_type = 'PRIMARY KEY' 
+			AND tc.table_schema = DATABASE()
+		ORDER BY tc.table_name, kcu.ordinal_position
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " AND tc.table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetIndexesQueries returns queries for retrieving indexes in MySQL
+func (s *MySQLStrategy) GetIndexesQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			table_name,
+			index_name,
+			GROUP_CONCAT(column_name ORDER BY seq_in_index) as column_names,
+			non_unique
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		GROUP BY table_name, index_name, non_unique
+		ORDER BY table_name, index_name
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " HAVING table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
 // GenericStrategy implements DatabaseStrategy for unknown database types
 type GenericStrategy struct{}
 
@@ -333,6 +465,55 @@ func (s *GenericStrategy) GetRelationshipsQueries(table string) []queryWithArgs 
 	}
 
 	return []queryWithArgs{pgQuery, mysqlQuery}
+}
+
+// GetPrimaryKeysQueries returns queries for retrieving primary keys (generic)
+func (s *GenericStrategy) GetPrimaryKeysQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			tc.table_name,
+			kcu.column_name,
+			tc.constraint_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu 
+			ON tc.constraint_name = kcu.constraint_name
+		WHERE tc.constraint_type = 'PRIMARY KEY'
+		ORDER BY tc.table_name, kcu.ordinal_position
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " AND tc.table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
+}
+
+// GetIndexesQueries returns queries for retrieving indexes (generic)
+func (s *GenericStrategy) GetIndexesQueries(table string) []queryWithArgs {
+	baseQuery := `
+		SELECT 
+			table_name,
+			index_name,
+			column_name
+		FROM information_schema.statistics
+		ORDER BY table_name, index_name
+	`
+	
+	if table == "" {
+		return []queryWithArgs{{query: baseQuery, args: []interface{}{}}}
+	}
+	
+	return []queryWithArgs{
+		{
+			query: baseQuery + " WHERE table_name = ?",
+			args:  []interface{}{table},
+		},
+	}
 }
 
 // createSchemaExplorerTool creates a tool for exploring database schema
@@ -564,6 +745,84 @@ func getRelationships(ctx context.Context, db db.Database, table string) (interf
 	}, nil
 }
 
+// getPrimaryKeys retrieves the primary keys for a table or all tables
+func getPrimaryKeys(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	// Get database type from connected database
+	driverName := db.DriverName()
+	dbType := driverName
+
+	// Create the appropriate strategy
+	strategy := NewDatabaseStrategy(driverName)
+
+	// Get queries from strategy
+	queries := strategy.GetPrimaryKeysQueries(table)
+
+	// Execute queries with fallbacks
+	rows, err := executeWithFallbacks(ctx, db, queries, "getPrimaryKeys")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary keys for table %s: %w", table, err)
+	}
+
+	defer func() {
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
+		}
+	}()
+
+	// Convert rows to maps
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process primary keys: %w", err)
+	}
+
+	return map[string]interface{}{
+		"primary_keys": results,
+		"dbType":       dbType,
+		"table":        table,
+	}, nil
+}
+
+// getIndexes retrieves the indexes for a table or all tables
+func getIndexes(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	// Get database type from connected database
+	driverName := db.DriverName()
+	dbType := driverName
+
+	// Create the appropriate strategy
+	strategy := NewDatabaseStrategy(driverName)
+
+	// Get queries from strategy
+	queries := strategy.GetIndexesQueries(table)
+
+	// Execute queries with fallbacks
+	rows, err := executeWithFallbacks(ctx, db, queries, "getIndexes")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get indexes for table %s: %w", table, err)
+	}
+
+	defer func() {
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
+		}
+	}()
+
+	// Convert rows to maps
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process indexes: %w", err)
+	}
+
+	return map[string]interface{}{
+		"indexes": results,
+		"dbType":  dbType,
+		"table":   table,
+	}, nil
+}
+
 // safeGetMap safely gets a map from an interface value
 func safeGetMap(obj interface{}) (map[string]interface{}, error) {
 	if obj == nil {
@@ -610,35 +869,88 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		return nil, fmt.Errorf("invalid tables data format")
 	}
 
-	// For each table, get columns
-	fullSchema := make(map[string]interface{})
+	// For each table, get detailed information
+	detailedSchema := make(map[string]interface{})
 	for _, tableInfo := range tablesSlice {
 		tableName, err := safeGetString(tableInfo, "table_name")
 		if err != nil {
 			return nil, fmt.Errorf("invalid table info: %w", err)
 		}
 
+		// Get columns
 		columnsResult, columnsErr := getColumns(ctx, db, tableName)
 		if columnsErr != nil {
-			return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, columnsErr)
+			logger.Warn("Failed to get columns for table %s: %v", tableName, columnsErr)
+			continue
 		}
-		fullSchema[tableName] = columnsResult
+		
+		columnsMap, _ := safeGetMap(columnsResult)
+		
+		// Get primary keys for this table
+		primaryKeysResult, pkErr := getPrimaryKeys(ctx, db, tableName)
+		var primaryKeys []map[string]interface{}
+		if pkErr != nil {
+			logger.Warn("Failed to get primary keys for table %s: %v", tableName, pkErr)
+			primaryKeys = []map[string]interface{}{}
+		} else {
+			pkMap, _ := safeGetMap(primaryKeysResult)
+			if pks, ok := pkMap["primary_keys"].([]map[string]interface{}); ok {
+				primaryKeys = pks
+			}
+		}
+		
+		// Get indexes for this table
+		indexesResult, idxErr := getIndexes(ctx, db, tableName)
+		var indexes []map[string]interface{}
+		if idxErr != nil {
+			logger.Warn("Failed to get indexes for table %s: %v", tableName, idxErr)
+			indexes = []map[string]interface{}{}
+		} else {
+			idxMap, _ := safeGetMap(indexesResult)
+			if idxs, ok := idxMap["indexes"].([]map[string]interface{}); ok {
+				indexes = idxs
+			}
+		}
+
+		// Build detailed table schema
+		detailedSchema[tableName] = map[string]interface{}{
+			"columns":      columnsMap["columns"],
+			"primary_keys": primaryKeys,
+			"indexes":      indexes,
+		}
 	}
 
 	// Get all relationships
 	relationships, relErr := getRelationships(ctx, db, "")
+	var foreignKeys []map[string]interface{}
 	if relErr != nil {
-		return nil, fmt.Errorf("failed to get relationships: %w", relErr)
+		logger.Warn("Failed to get relationships: %v", relErr)
+		foreignKeys = []map[string]interface{}{}
+	} else {
+		relMap, _ := safeGetMap(relationships)
+		if fks, ok := relMap["relationships"].([]map[string]interface{}); ok {
+			foreignKeys = fks
+		}
 	}
 
-	relMap, err := safeGetMap(relationships)
-	if err != nil {
-		return nil, fmt.Errorf("invalid relationships result: %w", err)
+	// Organize foreign keys by table
+	fksByTable := make(map[string][]map[string]interface{})
+	for _, fk := range foreignKeys {
+		if tableName, ok := fk["table_name"].(string); ok {
+			fksByTable[tableName] = append(fksByTable[tableName], fk)
+		}
+	}
+	
+	// Add foreign keys to each table's detailed schema
+	for tableName, tableSchema := range detailedSchema {
+		if schema, ok := tableSchema.(map[string]interface{}); ok {
+			schema["foreign_keys"] = fksByTable[tableName]
+		}
 	}
 
 	return map[string]interface{}{
-		"tables":        tablesSlice,
-		"schema":        fullSchema,
-		"relationships": relMap["relationships"],
+		"tables":          tablesSlice,
+		"detailed_schema": detailedSchema,
+		"foreign_keys":    foreignKeys,
 	}, nil
 }
