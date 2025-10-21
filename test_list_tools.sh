@@ -11,3 +11,5 @@ cd /home/cgonzalez/repos/cgonzalez-vt/db-mcp-server/bin
 
 
 
+
+
