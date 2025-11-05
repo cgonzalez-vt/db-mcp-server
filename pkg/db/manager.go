@@ -94,14 +94,19 @@ func (m *Manager) LoadConfig(configJSON []byte) error {
 }
 
 // Connect establishes connections to all configured databases
+// Returns error only if NO databases could be connected
 func (m *Manager) Connect() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	var failedConnections []string
+	successCount := 0
 
 	// Connect to each database
 	for id, cfg := range m.configs {
 		// Skip if already connected
 		if _, exists := m.connections[id]; exists {
+			successCount++
 			continue
 		}
 
@@ -149,16 +154,33 @@ func (m *Manager) Connect() error {
 		// Create and connect to database
 		db, err := NewDatabase(dbConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create database instance for %s: %w", id, err)
+			logger.Warn("Failed to create database instance for %s: %v", id, err)
+			failedConnections = append(failedConnections, fmt.Sprintf("%s (create failed)", id))
+			continue
 		}
 
 		if err := db.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to database %s: %w", id, err)
+			logger.Warn("Failed to connect to database %s: %v", id, err)
+			failedConnections = append(failedConnections, fmt.Sprintf("%s (connection failed)", id))
+			continue
 		}
 
 		// Store connected database
 		m.connections[id] = db
+		successCount++
 		logger.Info("Connected to database %s (%s at %s:%d/%s)", id, cfg.Type, cfg.Host, cfg.Port, cfg.Name)
+	}
+
+	// Log summary
+	if len(failedConnections) > 0 {
+		logger.Warn("Failed to connect to %d database(s): %v", len(failedConnections), failedConnections)
+	}
+
+	logger.Info("Successfully connected to %d out of %d configured databases", successCount, len(m.configs))
+
+	// Only return error if NO databases connected
+	if successCount == 0 {
+		return fmt.Errorf("failed to connect to any databases: all %d connection attempts failed", len(m.configs))
 	}
 
 	return nil

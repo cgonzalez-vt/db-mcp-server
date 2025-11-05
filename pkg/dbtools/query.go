@@ -131,57 +131,6 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	return result, nil
 }
 
-// createMockQueryTool creates a mock version of the query tool
-//
-//nolint:unused // Retained for future use
-func createMockQueryTool() *tools.Tool {
-	// Create the tool using the same schema as the real query tool
-	tool := createQueryTool()
-
-	// Replace the handler with mock implementation
-	tool.Handler = handleMockQuery
-
-	return tool
-}
-
-// handleMockQuery is a mock implementation of the query handler
-//
-//nolint:unused // Retained for future use
-func handleMockQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract parameters
-	query, ok := getStringParam(params, "query")
-	if !ok {
-		return nil, fmt.Errorf("query parameter is required")
-	}
-
-	// Extract query parameters if provided
-	var queryParams []interface{}
-	if paramsArray, ok := getArrayParam(params, "params"); ok {
-		queryParams = paramsArray
-	}
-
-	// Create mock results
-	mockResults := []map[string]interface{}{
-		{
-			"id":        1,
-			"name":      "Mock Result 1",
-			"timestamp": time.Now().Format(time.RFC3339),
-		},
-		{
-			"id":        2,
-			"name":      "Mock Result 2",
-			"timestamp": time.Now().Add(-time.Hour).Format(time.RFC3339),
-		},
-	}
-
-	return map[string]interface{}{
-		"results":  mockResults,
-		"query":    query,
-		"params":   queryParams,
-		"rowCount": len(mockResults),
-	}, nil
-}
-
 // containsIgnoreCase checks if a string contains a substring, ignoring case
 //
 //nolint:unused // Retained for future use
@@ -193,14 +142,14 @@ func containsIgnoreCase(s, substr string) bool {
 func validateReadOnlyQuery(query string) error {
 	// Normalize query to uppercase for checking
 	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-	
+
 	// List of write operation keywords that should be rejected
 	writeKeywords := []string{
 		"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
 		"TRUNCATE", "REPLACE", "MERGE", "GRANT", "REVOKE",
 		"EXEC", "EXECUTE", "CALL",
 	}
-	
+
 	// Check if the query starts with any write operation
 	for _, keyword := range writeKeywords {
 		if strings.HasPrefix(upperQuery, keyword) {
@@ -211,20 +160,20 @@ func validateReadOnlyQuery(query string) error {
 			return fmt.Errorf("write operations are not allowed in read-only mode: detected %s statement", keyword)
 		}
 	}
-	
+
 	// Additional check for common write patterns in the middle of queries
 	// This catches cases like "SELECT ... INTO", "WITH ... INSERT", etc.
 	dangerousPatterns := []string{
 		"INSERT INTO", "UPDATE ", "DELETE FROM", "DROP ", "CREATE ",
 		"ALTER ", "TRUNCATE ", "INTO OUTFILE", "INTO DUMPFILE",
 	}
-	
+
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(upperQuery, pattern) {
 			return fmt.Errorf("write operations are not allowed in read-only mode: detected '%s' pattern", pattern)
 		}
 	}
-	
+
 	// Check for SELECT INTO pattern (but allow INTO OUTFILE/DUMPFILE which are already caught)
 	if strings.Contains(upperQuery, " INTO ") {
 		// This could be SELECT INTO or INSERT INTO
@@ -233,7 +182,7 @@ func validateReadOnlyQuery(query string) error {
 			return fmt.Errorf("write operations are not allowed in read-only mode: detected 'INTO' clause")
 		}
 	}
-	
+
 	return nil
 }
 

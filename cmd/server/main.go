@@ -166,12 +166,9 @@ func main() {
 
 	// Register tools
 	if err := toolRegistry.RegisterAllTools(ctx, dbUseCase); err != nil {
-		logger.Warn("Warning: error registering tools: %v", err)
-		// If there was an error registering tools, register mock tools as fallback
-		logger.Info("Registering mock tools as fallback due to error...")
-		if err := toolRegistry.RegisterMockTools(ctx); err != nil {
-			logger.Warn("Warning: error registering mock tools: %v", err)
-		}
+		logger.Error("Failed to register tools: %v", err)
+		logger.Error("Cannot start server without database connections")
+		os.Exit(1)
 	}
 	logger.Info("Finished registering tools")
 
@@ -187,13 +184,6 @@ func main() {
 		logger.Info("    - list_databases: List all available databases")
 	}
 
-	// If no database connections, register mock tools to ensure at least some tools are available
-	if len(dbIDs) == 0 {
-		logger.Info("No database connections available. Adding mock tools...")
-		if err := toolRegistry.RegisterMockTools(ctx); err != nil {
-			logger.Warn("Warning: error registering mock tools: %v", err)
-		}
-	}
 
 	// Create a session store to track valid sessions
 	sessions := make(map[string]bool)

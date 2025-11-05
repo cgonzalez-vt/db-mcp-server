@@ -53,6 +53,24 @@ func (m *MockDatabaseUseCase) ListDatabases() []string {
 	return args.Get(0).([]string)
 }
 
+// GetDatabaseMetadata mocks the GetDatabaseMetadata method
+func (m *MockDatabaseUseCase) GetDatabaseMetadata(dbID string) (map[string]interface{}, error) {
+	args := m.Called(dbID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+// GetDetailedDatabaseSchema mocks the GetDetailedDatabaseSchema method
+func (m *MockDatabaseUseCase) GetDetailedDatabaseSchema(dbID string) (map[string]interface{}, error) {
+	args := m.Called(dbID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
 func TestTimescaleDBTool(t *testing.T) {
 	tool := mcp.NewTimescaleDBTool()
 	assert.Equal(t, "timescaledb", tool.GetName())

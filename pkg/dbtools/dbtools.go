@@ -48,7 +48,7 @@ type ConnectionConfig struct {
 	Name     string       `json:"name"`
 	User     string       `json:"user"`
 	Password string       `json:"password"`
-	
+
 	// Display metadata (for MCP client context)
 	DisplayName string   `json:"display_name,omitempty"`
 	Project     string   `json:"project,omitempty"`
@@ -655,9 +655,9 @@ func RegisterMCPDatabaseTools(registry *tools.Registry) error {
 	// Get available databases
 	dbs := ListDatabases()
 
-	// If no databases are available, register mock tools
+	// If no databases are available, return an error
 	if len(dbs) == 0 {
-		return registerMCPMockTools(registry)
+		return fmt.Errorf("no database connections available - cannot register tools")
 	}
 
 	// Register MCP tools for each database (read-only tools only)
@@ -742,83 +742,15 @@ func RegisterMCPDatabaseTools(registry *tools.Registry) error {
 	return nil
 }
 
-// Helper function to create mock tools for MCP compatibility
-func registerMCPMockTools(registry *tools.Registry) error {
-	mockDBID := "mock"
-
-	// Register mock query tool
-	registry.RegisterTool(&tools.Tool{
-		Name:        fmt.Sprintf("query_%s", mockDBID),
-		Description: fmt.Sprintf("Execute SQL query on %s database", mockDBID),
-		InputSchema: tools.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"query": map[string]interface{}{
-					"type":        "string",
-					"description": "SQL query to execute",
-				},
-				"params": map[string]interface{}{
-					"type":        "array",
-					"description": "Query parameters",
-					"items": map[string]interface{}{
-						"type": "string",
-					},
-				},
-			},
-			Required: []string{"query"},
-		},
-		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			query, _ := getStringParam(params, "query")
-			return map[string]interface{}{
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": fmt.Sprintf("Mock query executed:\n%s\n\nThis is a mock response.", query),
-					},
-				},
-				"mock": true,
-			}, nil
-		},
-	})
-
-	// Register list_databases tool
-	registry.RegisterTool(&tools.Tool{
-		Name:        "list_databases",
-		Description: "List all available databases on database",
-		InputSchema: tools.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"random_string": map[string]interface{}{
-					"type":        "string",
-					"description": "Dummy parameter (optional)",
-				},
-			},
-		},
-		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			return map[string]interface{}{
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": "Available databases:\n\n1. mock (not connected)\n",
-					},
-				},
-				"mock": true,
-			}, nil
-		},
-	})
-
-	return nil
-}
-
 // Handler functions for specific databases
 func handleQueryForDatabase(ctx context.Context, params map[string]interface{}, dbID string) (interface{}, error) {
 	query, _ := getStringParam(params, "query")
-	
+
 	// Validate that the query is read-only
 	if err := validateReadOnlyQuery(query); err != nil {
 		return createErrorResponse(err.Error()), nil
 	}
-	
+
 	paramList, hasParams := getArrayParam(params, "params")
 
 	var queryParams []interface{}
@@ -1001,7 +933,7 @@ func handlePerformanceForDatabase(ctx context.Context, params map[string]interfa
 		limit = int(limitVal)
 	}
 
-	// Return a basic mock response for the performance action
+	// Return a basic response for the performance action
 	return map[string]interface{}{
 		"content": []map[string]interface{}{
 			{

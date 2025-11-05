@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockDatabaseUseCase is a mock implementation of the database use case
+// MockDatabaseUseCase is a mock implementation of the database use case for testing
 type MockDatabaseUseCase struct {
 	mock.Mock
 }
@@ -41,8 +41,26 @@ func (m *MockDatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
+// GetDatabaseMetadata mocks the GetDatabaseMetadata method
+func (m *MockDatabaseUseCase) GetDatabaseMetadata(dbID string) (map[string]interface{}, error) {
+	args := m.Called(dbID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
 // ListDatabases mocks the ListDatabases method
 func (m *MockDatabaseUseCase) ListDatabases() []string {
 	args := m.Called()
 	return args.Get(0).([]string)
+}
+
+// GetDetailedDatabaseSchema mocks the GetDetailedDatabaseSchema method
+func (m *MockDatabaseUseCase) GetDetailedDatabaseSchema(dbID string) (map[string]interface{}, error) {
+	args := m.Called(dbID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]interface{}), args.Error(1)
 }

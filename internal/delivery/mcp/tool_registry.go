@@ -42,27 +42,34 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 	logger.Info("Found %d database connections for tool registration: %v", len(dbList), dbList)
 
 	if len(dbList) == 0 {
-		logger.Info("No databases available, registering mock tools")
-		return tr.RegisterMockTools(ctx)
+		return fmt.Errorf("no database connections available - cannot register tools")
 	}
 
 	// Register database-specific tools
 	registrationErrors := 0
+	successfulRegistrations := 0
 	for _, dbID := range dbList {
 		if err := tr.registerDatabaseTools(ctx, dbID); err != nil {
-			logger.Error("Error registering tools for database %s: %v", dbID, err)
+			logger.Warn("Failed to register tools for database %s: %v", dbID, err)
 			registrationErrors++
 		} else {
 			logger.Info("Successfully registered tools for database %s", dbID)
+			successfulRegistrations++
 		}
 	}
 
 	// Register common tools
 	tr.registerCommonTools(ctx)
 
-	if registrationErrors > 0 {
-		return fmt.Errorf("errors occurred while registering tools for %d databases", registrationErrors)
+	// Log summary
+	logger.Info("Tool registration complete: %d successful, %d failed out of %d databases",
+		successfulRegistrations, registrationErrors, len(dbList))
+
+	// Only fail if NO tools were registered successfully
+	if successfulRegistrations == 0 {
+		return fmt.Errorf("failed to register tools for any databases: all %d attempts failed", len(dbList))
 	}
+
 	return nil
 }
 
@@ -75,46 +82,6 @@ func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string) 
 
 	logger.Info("Registering tools for database %s", dbID)
 
-	// Special case for postgres - skip the database info call that's failing
-	dbType, err := tr.databaseUseCase.GetDatabaseType(dbID)
-	if err == nil && dbType == "postgres" {
-		// For PostgreSQL, we'll manually create a minimal info structure
-		// rather than calling the problematic method
-		logger.Info("Using special handling for PostgreSQL database: %s", dbID)
-
-		// Create a mock database info for PostgreSQL
-		dbInfo := map[string]interface{}{
-			"database": dbID,
-			"tables":   []map[string]interface{}{},
-		}
-
-		logger.Info("Created mock database info for PostgreSQL database %s: %+v", dbID, dbInfo)
-
-		// Register each tool type for this database
-		registrationErrors := 0
-		for _, typeName := range toolTypeNames {
-			// Use simpler tool names: <tooltype>_<dbID>
-			toolName := fmt.Sprintf("%s_%s", typeName, dbID)
-			if err := tr.registerTool(ctx, typeName, toolName, dbID); err != nil {
-				logger.Error("Error registering tool %s: %v", toolName, err)
-				registrationErrors++
-			} else {
-				logger.Info("Successfully registered tool %s", toolName)
-			}
-		}
-
-		// TimescaleDB tools are disabled (read-only mode)
-		logger.Info("Skipping TimescaleDB tools registration (read-only mode)")
-
-		if registrationErrors > 0 {
-			return fmt.Errorf("errors occurred while registering %d tools", registrationErrors)
-		}
-
-		logger.Info("Completed registering tools for database %s", dbID)
-		return nil
-	}
-
-	// For other database types, continue with the normal approach
 	// Check if this database actually exists
 	dbInfo, err := tr.databaseUseCase.GetDatabaseInfo(dbID)
 	if err != nil {
@@ -179,37 +146,6 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 			logger.Info("Successfully registered tool %s", listDbName)
 		}
 	}
-}
-
-// RegisterMockTools registers mock tools with the server when no db connections available
-func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
-	logger.Info("Registering mock tools")
-
-	// For each tool type, register a simplified mock tool
-	for toolTypeName := range tr.factory.toolTypes {
-		// Format: mock_<tooltype>
-		mockToolName := fmt.Sprintf("mock_%s", toolTypeName)
-
-		toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
-		if !ok {
-			logger.Warn("Failed to get tool type for '%s'", toolTypeName)
-			continue
-		}
-
-		tool := toolTypeImpl.CreateTool(mockToolName, "mock")
-
-		err := tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
-			response, err := toolTypeImpl.HandleRequest(ctx, request, "mock", tr.databaseUseCase)
-			return FormatResponse(response, err)
-		})
-
-		if err != nil {
-			logger.Error("Failed to register mock tool '%s': %v", mockToolName, err)
-			continue
-		}
-	}
-
-	return nil
 }
 
 // RegisterCursorCompatibleTools is kept for backward compatibility but does nothing

@@ -1,7 +1,6 @@
 package dbtools
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,26 +42,6 @@ func TestCreateQueryBuilderTool(t *testing.T) {
 	assert.Contains(t, tool.InputSchema.Properties, "query")
 	assert.Contains(t, tool.InputSchema.Properties, "components")
 	assert.Contains(t, tool.InputSchema.Required, "action")
-}
-
-// TestMockValidateQuery tests the mock validation functionality
-func TestMockValidateQuery(t *testing.T) {
-	// Test a valid query
-	validQuery := "SELECT * FROM users WHERE id > 10"
-	validResult, err := mockValidateQuery(validQuery)
-	assert.NoError(t, err)
-	resultMap := validResult.(map[string]interface{})
-	assert.True(t, resultMap["valid"].(bool))
-	assert.Equal(t, validQuery, resultMap["query"])
-
-	// Test an invalid query - missing FROM
-	invalidQuery := "SELECT * users"
-	invalidResult, err := mockValidateQuery(invalidQuery)
-	assert.NoError(t, err)
-	invalidMap := invalidResult.(map[string]interface{})
-	assert.False(t, invalidMap["valid"].(bool))
-	assert.Equal(t, invalidQuery, invalidMap["query"])
-	assert.Contains(t, invalidMap["error"], "Missing FROM clause")
 }
 
 // TestGetSuggestionForError tests the error suggestion generator
@@ -139,41 +118,6 @@ func TestCalculateQueryComplexity(t *testing.T) {
 	ORDER BY total_spent DESC
 	`
 	assert.Equal(t, "Complex", calculateQueryComplexity(complexQuery))
-}
-
-// TestMockAnalyzeQuery tests the mock query analysis functionality
-func TestMockAnalyzeQuery(t *testing.T) {
-	// Test a simple query
-	simpleQuery := "SELECT * FROM users"
-	simpleResult, err := mockAnalyzeQuery(simpleQuery)
-	assert.NoError(t, err)
-	simpleMap := simpleResult.(map[string]interface{})
-
-	// The query is converted to uppercase in the function
-	queryValue := simpleMap["query"].(string)
-	assert.Equal(t, strings.ToUpper(simpleQuery), queryValue)
-
-	assert.NotNil(t, simpleMap["explainPlan"])
-	assert.NotNil(t, simpleMap["issues"])
-	assert.NotNil(t, simpleMap["suggestions"])
-	assert.Equal(t, "Simple", simpleMap["complexity"])
-
-	// Test a complex query with joins
-	complexQuery := "SELECT * FROM users JOIN orders ON users.id = orders.user_id JOIN order_items ON orders.id = order_items.order_id"
-	complexResult, err := mockAnalyzeQuery(complexQuery)
-	assert.NoError(t, err)
-	complexMap := complexResult.(map[string]interface{})
-	issues := complexMap["issues"].([]string)
-
-	// Check that it detected multiple joins
-	joinIssueFound := false
-	for _, issue := range issues {
-		if issue == "Query contains multiple joins" {
-			joinIssueFound = true
-			break
-		}
-	}
-	assert.True(t, joinIssueFound, "Should detect multiple joins issue")
 }
 
 // TestGetTableFromQuery tests the table name extraction from queries
